@@ -61,11 +61,18 @@ const P = {
 const ic = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
 
 /* ---------- logika kas ---------- */
-const nowIdx = tahun => {
-  const d = new Date();
-  if (d.getFullYear() < tahun) return -1;
-  if (d.getFullYear() > tahun) return 47;
-  return d.getMonth() * 4 + Math.min(3, Math.floor((d.getDate() - 1) / 7));
+/* Tagihan baru muncul tiap hari SENIN (0=Minggu, 1=Senin ... 6=Sabtu). Mau hari lain? ubah angka ini. */
+const HARI_TAGIH = 1;
+/* Minggu ke berapa sekarang? Senin pertama bulan = M1, Senin kedua = M2, dst (maks M4:
+   kalau bulan punya 5 Senin, Senin ke-5 tidak menambah tagihan baru). Sebelum Senin pertama
+   bulan itu, masih dihitung minggu terakhir bulan lalu. */
+const nowIdx = (tahun, d = new Date()) => {
+  const y = d.getFullYear();
+  if (y < tahun) return -1;
+  if (y > tahun) return 47;
+  const lastMon = d.getDate() - ((d.getDay() - HARI_TAGIH + 7) % 7);   // tanggal hari tagih terakhir (<= hari ini)
+  if (lastMon < 1) return d.getMonth() * 4 - 1;                      // belum ada hari tagih di bulan ini
+  return d.getMonth() * 4 + Math.min(3, Math.floor((lastMon - 1) / 7));
 };
 const idxLabel = i => `M${(i % 4) + 1} ${BLN[Math.floor(i / 4)]}`;
 const idxDate = (tahun, i) => `${tahun}-${pad(Math.floor(i / 4) + 1)}-${pad(Math.min(28, (i % 4) * 7 + 3))}`;
@@ -663,4 +670,7 @@ async function boot() {
   loadData(true);
 }
 boot();
+/* ganti hari (mis. lewat tengah malam Senin) saat web masih terbuka -> hitung ulang tagihan otomatis */
+let hariIni = new Date().toDateString();
+setInterval(() => { const t = new Date().toDateString(); if (t !== hariIni) { hariIni = t; if (S.data) render(true); } }, 60000);
 })();
