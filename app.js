@@ -4,6 +4,7 @@
 const CFG = window.KAS_CONFIG || {};
 const SB = CFG.SUPABASE_URL && CFG.SUPABASE_KEY ? { url: CFG.SUPABASE_URL.replace(/\/+$/, ''), key: CFG.SUPABASE_KEY } : null;
 const DEMO = !SB && !CFG.API_URL;
+const PAY = (CFG.PAY_URL || '').replace(/\/+$/, '');
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -56,6 +57,11 @@ const P = {
   coin:'<circle cx="9" cy="9" r="6"/><path d="M15.5 8.6A6 6 0 1 1 8.6 15.5"/>',
   vote:'<path d="M7 20V10M12 20V4M17 20v-7"/>',
   task:'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="m9 12 2 2 4-4"/>',
+  book:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M20 17v4H6.5a2.5 2.5 0 0 1 0-4"/>',
+  tin:'<path d="M17 7 7 17M17 17H7V7"/>',
+  tout:'<path d="M7 17 17 7M7 7h10v10"/>',
+  unlock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
+  camera:'<path d="M4 8h3l2-3h6l2 3h3v12H4z"/><circle cx="12" cy="13" r="3.5"/>',
   shield:'<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>'
 };
 const ic = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -100,8 +106,8 @@ const totals = D => {
   return { masuk, keluar, saldo: masuk - keluar, arrearsPeople, arrearsRp };
 };
 const hue = id => [152, 160, 168, 146, 175, 138, 182, 156][id % 8];
-const initials = n => n.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-const avatar = s => `<div class="av" style="background:linear-gradient(135deg,hsl(${hue(s.id)} 60% 38%),hsl(${hue(s.id)} 55% 52%))">${esc(initials(s.nama))}</div>`;
+const initials = n => n.replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+const avatar = (s, cls = '') => s.foto ? `<div class="av ${cls}"><img src="${esc(s.foto)}" alt="" loading="lazy" decoding="async"></div>` : `<div class="av ${cls}" style="background:linear-gradient(135deg,hsl(${hue(s.id)} 60% 38%),hsl(${hue(s.id)} 55% 52%))">${esc(initials(s.nama))}</div>`;
 
 /* ---------- API (server Google Apps Script atau demo lokal) ---------- */
 const Demo = {
@@ -111,13 +117,25 @@ const Demo = {
   seed() {
     // Mulai dari 0: tidak ada siswa, transaksi, atau pengumuman. Semua diisi admin.
     const settings = { kelas: 'Kelas', tahun: new Date().getFullYear(), mulaiBulan: new Date().getMonth() + 1, nominal: 5000, bendahara: 'Kucay', wa: '', spreadsheetUrl: '', qris: '' };
-    return { settings, students: [], paid: {}, tx: [], ann: [], nid: { tx: 1, ann: 1, st: 1 }, pin: '1234' };
+    return { settings, students: [], paid: {}, tx: [], ann: [], nid: { tx: 1, ann: 1, st: 1 }, pin: '1234', claims: {} };
   },
   async call(action, p = {}) {
     await new Promise(r => setTimeout(r, action === 'data' ? 750 : 180));
     const d = this.load();
     const out = x => (this.save(d), { ok: true, data: this.view(d), ...x });
-    if (action === 'data') return { ok: true, data: this.view(d) };
+    d.claims = d.claims || {};
+    const mine = () => d.claims[p.token] || 0;
+    if (action === 'data') return { ok: true, data: this.view(d), me: mine() };
+    if (action === 'claim') {
+      if (mine()) return { ok: false, error: 'Perangkat ini sudah punya nama. Minta admin melepas klaim dulu.' };
+      if (Object.values(d.claims).includes(p.studentId)) return { ok: false, error: 'Nama ini sudah diklaim orang lain' };
+      d.claims[p.token] = p.studentId; this.save(d); return { ok: true, data: this.view(d), me: p.studentId };
+    }
+    if (action === 'unclaim') { delete d.claims[p.token]; this.save(d); return { ok: true, data: this.view(d), me: 0 }; }
+    if (action === 'photo') {
+      const s = d.students.find(x => x.id === mine()); if (!s) return { ok: false, error: 'Pilih namamu dulu' };
+      s.foto = p.foto || ''; this.save(d); return { ok: true, data: this.view(d), me: s.id };
+    }
     if (action === 'login') return p.pin === d.pin ? { ok: true } : { ok: false, error: 'PIN salah' };
     if (p.pin !== d.pin) return { ok: false, error: 'Khusus admin. Masuk dulu.' };
     const nom = Number(d.settings.nominal);
@@ -138,13 +156,14 @@ const Demo = {
       case 'saveSettings': Object.assign(d.settings, p.settings); return out();
       case 'saveQris': d.settings.qris = p.qris; return out();
       case 'saveStudent': Object.assign(d.students.find(s => s.id === p.id) || {}, { nama: p.nama, hp: p.hp || '' }); return out();
-      case 'addStudent': { const id = d.nid.st++; d.students.push({ id, no: d.students.length + 1, nama: p.nama, hp: p.hp || '' }); d.paid[id] = []; return out(); }
+      case 'addStudent': { const id = d.nid.st++; d.students.push({ id, no: d.students.length + 1, nama: p.nama, hp: p.hp || '', foto: '' }); d.paid[id] = []; return out(); }
       case 'deleteStudent': { d.students = d.students.filter(x => x.id !== p.id); d.students.forEach((x, i) => x.no = i + 1); delete d.paid[p.id]; d.tx = d.tx.filter(t => t.siswaId !== p.id); return out(); }
+      case 'releaseClaim': for (const k in d.claims) if (d.claims[k] === p.id) delete d.claims[k]; return out();
       case 'changePin': d.pin = p.newPin; return out();
     }
     return { ok: false, error: 'Aksi tidak dikenal' };
   },
-  view(d) { const c = JSON.parse(JSON.stringify(d)); delete c.pin; delete c.nid; return c; }
+  view(d) { const c = JSON.parse(JSON.stringify(d)); const taken = new Set(Object.values(d.claims || {})); c.students.forEach(s => s.claimed = taken.has(s.id)); delete c.pin; delete c.nid; delete c.claims; return c; }
 };
 /* Supabase: semua lewat fungsi RPC (tabel terkunci, hanya admin ber-PIN yang bisa menulis) */
 async function rpc(fn, args) {
@@ -159,13 +178,16 @@ async function rpc(fn, args) {
   } finally { clearTimeout(to); }
 }
 async function api(action, p = {}) {
-  const body = { action, pin: S.pin, ...p };
+  const body = { action, pin: S.pin, token: S.token, ...p };
   if (DEMO) return Demo.call(action, body);
   try {
     if (SB) {
-      if (action === 'data') return await rpc('kas_get');
+      if (action === 'data') return await rpc('kas_get', { p_token: S.token });
+      if (action === 'claim') return await rpc('kas_claim', { p_token: S.token, p_student: p.studentId });
+      if (action === 'unclaim') return await rpc('kas_unclaim', { p_token: S.token });
+      if (action === 'photo') return await rpc('kas_set_photo', { p_token: S.token, p_foto: p.foto || '' });
       if (action === 'login') return await rpc('kas_login', { p_pin: String(p.pin || '') });
-      const { action: _a, pin: _p, ...rest } = body;
+      const { action: _a, pin: _p, token: _t, ...rest } = body;
       return await rpc('kas_do', { p_pin: String(S.pin || ''), p_action: action, p: rest });
     }
     const res = action === 'data'
@@ -176,7 +198,9 @@ async function api(action, p = {}) {
 }
 
 /* ---------- state ---------- */
+const newToken = () => { const a = new Uint8Array(16); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => a[i] = Math.random() * 256); return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); };
 const S = {
+  token: ls.get('kas-token', '') || (() => { const t = newToken(); ls.set('kas-token', t); return t; })(),
   data: null, admin: false, pin: ls.get('kas-pin', '') || '', me: ls.get('kas-me', 0), route: 'beranda',
   loading: true, updated: null, txFilter: 'Semua', stFilter: 'Semua', q: '', sheet: null, payWeeks: null, lim: { st: 16, tx: 14 }
 };
@@ -208,11 +232,10 @@ const skeleton = () => `
   <div class="list">${'<div class="sk sk-row"></div>'.repeat(6)}</div>`;
 
 /* ---------- komponen ---------- */
-const header = (sub) => `
+const header = sub => `
   <header class="top glass fx">
-    <div class="brand"><img src="img/icon-192.png" alt="" width="40" height="40"><div><b>Kas Kelas</b><small>${esc(sub || (S.data ? S.data.settings.kelas + ' · Laporan keuangan kelas' : 'Laporan keuangan kelas'))}</small></div></div>
+    <div class="brand"><div><b>Kas Kelas</b><small>${esc((sub || (S.data ? S.data.settings.kelas : '')) + (S.admin ? ' · Admin' : ''))}</small></div></div>
     <div class="top-r">
-      ${S.admin ? '<span class="pill">Admin</span>' : ''}
       <button class="ib ${S.loading ? 'spin' : ''}" data-act="refresh" aria-label="Segarkan data">${ic('refresh')}</button>
       <button class="ib" data-act="notif" aria-label="Pengingat">${ic('bell')}</button>
     </div>
@@ -220,18 +243,18 @@ const header = (sub) => `
 const secH = (t, link) => `<div class="sec-h fx"><h2>${t}</h2>${link || ''}</div>`;
 const studentRow = s => { const x = stat(s); return `
   <button class="row lite fx" data-act="openStudent" data-id="${s.id}">
-    ${avatar(s)}<div class="grow"><b>${esc(s.nama)}</b><small>No. ${s.no}${S.me === s.id ? ' · kamu' : ''}</small></div>${badge(x)}
+    ${avatar(s)}<div class="grow"><b>${esc(s.nama)}</b><small>${S.me === s.id ? 'Kamu' : 'No. ' + s.no}</small></div>${badge(x)}
   </button>`; };
 const txRow = t => `
   <div class="row lite fx">
-    <div class="tx-ic ${t.tipe === 'Masuk' ? 'in' : 'out'}">${ic(t.tipe === 'Masuk' ? 'down' : 'up', 18)}</div>
+    <div class="tx-ic ${t.tipe === 'Masuk' ? 'in' : 'out'}">${ic(t.tipe === 'Masuk' ? 'tin' : 'tout', 18)}</div>
     <div class="grow"><b>${esc(t.ket)}</b><small>${fmtDate(t.tgl)}</small></div>
     <span class="amt ${t.tipe === 'Masuk' ? 'in' : 'out'}">${t.tipe === 'Masuk' ? '+' : '-'}${rp(t.jumlah)}</span>
     ${S.admin ? `<button class="ib" style="width:34px;height:34px" data-act="editTx" data-id="${t.id}" aria-label="Edit">${ic('edit', 16)}</button>` : ''}
   </div>`;
 const weeklyAnn = () => { const st = S.data.settings; return `
   <div class="banner pin glass fx"><div class="tx-ic">${ic('mega')}</div>
-    <div class="grow"><b>Bayar kas tiap minggu ${rp(st.nominal)}</b><small>Bayar lewat QRIS ke bendahara ${esc(st.bendahara)}, lalu kirim bukti transfernya.</small></div>
+    <div class="grow"><b>Kas ${rp(st.nominal)} / minggu</b></div>
     <a class="btn primary sm" href="#/bayar">Bayar</a></div>`; };
 
 /* ---------- halaman ---------- */
@@ -242,16 +265,15 @@ V.beranda = () => {
   return `${header()}
   <section class="hero glass fx">
     <small>Total Saldo Kas</small><div class="big">${rp(T.saldo)}</div>
-    <small>Diperbarui ${S.updated ? S.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'hari ini'}</small>
-    <div class="meta"><span>${D.students.length} siswa</span><span>${rp(D.settings.nominal)} / minggu</span><span>Minggu ${idxLabel(nowIdx(Number(D.settings.tahun)) < 0 ? 0 : nowIdx(Number(D.settings.tahun)))}</span></div>
+    <div class="meta"><span>${D.students.length} siswa</span><span>${idxLabel(nowIdx(Number(D.settings.tahun)) < 0 ? 0 : nowIdx(Number(D.settings.tahun)))}</span></div>
   </section>
   <div class="stats">
     <div class="stat in glass fx">${ic('up')}<b>${rp(T.masuk)}</b><small>Masuk</small></div>
     <div class="stat out glass fx">${ic('down')}<b>${rp(T.keluar)}</b><small>Keluar</small></div>
     <div class="stat warn glass fx">${ic('alert')}<b>${T.arrearsPeople} Orang</b><small>Tunggakan</small></div>
   </div>
-  ${me && mx.arrears > 0 ? `<div class="banner glass fx"><div class="tx-ic">${ic('bell')}</div><div class="grow"><b>Hai ${esc(me.nama.split(' ')[0])}, kasmu belum lunas</b><small>${mx.arrears} minggu · ${rp(mx.amount)}</small></div><a class="btn primary sm" href="#/bayar">Bayar</a></div>` : ''}
-  ${!me ? `<button class="banner glass fx" data-act="pickMe" style="width:100%;text-align:left"><div class="tx-ic">${ic('user')}</div><div class="grow"><b>Pilih namamu</b><small>Supaya kamu dapat pengingat kalau belum bayar kas.</small></div>${ic('chev')}</button>` : ''}
+  ${me && mx.arrears > 0 ? `<div class="banner glass fx"><div class="tx-ic">${ic('bell')}</div><div class="grow"><b>Hai ${esc(me.nama.split(' ')[0])}, tunggakanmu ${rp(mx.amount)}</b><small>${mx.arrears} minggu</small></div><a class="btn primary sm" href="#/bayar">Bayar</a></div>` : ''}
+  ${!me ? `<button class="banner glass fx" data-act="pickMe" style="width:100%;text-align:left"><div class="tx-ic">${ic('user')}</div><div class="grow"><b>Pilih namamu</b></div>${ic('chev')}</button>` : ''}
   <div class="cols">
     <div>
       ${weeklyAnn()}
@@ -321,72 +343,138 @@ V.rangkuman = () => {
   </div></div>`;
 };
 
+/* ---------- pembayaran otomatis (Midtrans lewat Edge Function) ---------- */
+const Pay = {
+  order: ls.get('kas-order', null), timer: 0, ticks: 0, busy: false, manual: false,
+  set(o) { this.order = o; o ? ls.set('kas-order', o) : ls.del('kas-order'); },
+  async call(path, body) {
+    try { const r = await fetch(PAY + '/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return await r.json(); }
+    catch { return { ok: false, error: 'Tidak bisa terhubung. Cek internet.' }; }
+  },
+  idxs(s, w) {
+    const x = stat(s), out = [...x.due]; let i = Math.max(x.cur + 1, x.start);
+    while (out.length < w && i <= 47) { if (!x.paid.has(i)) out.push(i); i++; }
+    return out.slice(0, w);
+  },
+  async start(method) {
+    const s = S.data.students.find(v => v.id === S.me); if (!s || this.busy) return;
+    this.busy = true; render(true);
+    const r = await this.call('create', { studentId: s.id, idxs: this.idxs(s, S.payWeeks || 1), method });
+    this.busy = false;
+    if (r.ok) this.set(r.order); else toast(r.error || 'Gagal membuat tagihan');
+    render(true);
+  },
+  async check(manual) {
+    const o = this.order; if (!o || o.status !== 'pending') return;
+    const r = await this.call('check', { orderId: o.orderId });
+    if (r.ok && r.order) {
+      if (r.order.status !== 'pending') { this.set(r.order); if (r.order.status === 'paid') loadData(true); render(true); }
+      else if (manual) toast('Belum terbayar');
+    } else if (manual) toast(r.error || 'Gagal mengecek');
+  },
+  sync() {            // dipanggil setiap render: jalankan / hentikan penghitung & pengecekan otomatis
+    const o = this.order, on = PAY && S.route === 'bayar' && o && o.status === 'pending';
+    if (!on) { clearInterval(this.timer); this.timer = 0; return; }
+    this.drawQr();
+    if (this.timer) return;
+    this.ticks = 0;
+    this.timer = setInterval(() => {
+      const c = $('#payCd'), left = Math.max(0, Math.round((new Date(this.order.expiresAt) - Date.now()) / 1000));
+      if (c) c.textContent = pad(Math.floor(left / 60)) + ':' + pad(left % 60);
+      if (++this.ticks % 4 === 0 || left === 0) this.check();
+    }, 1000);
+  },
+  async drawQr() {
+    const box = $('#payQr'), o = this.order; if (!box || !o) return;
+    if (o.qrString) {
+      if (!window.qrcode) await new Promise(res => { const sc = document.createElement('script'); sc.src = 'qr.js'; sc.onload = res; sc.onerror = res; document.head.appendChild(sc); });
+      if (window.qrcode && $('#payQr')) { const q = qrcode(0, 'M'); q.addData(o.qrString); q.make(); $('#payQr').innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); return; }
+    }
+    if (o.qrUrl) box.innerHTML = `<img src="${esc(o.qrUrl)}" alt="QR pembayaran">`;
+  }
+};
+const payOrder = o => {
+  if (o.status === 'paid') return `<section class="card glass pay-ok fx"><div class="ok-ic">${ic('check', 34)}</div><h3>Pembayaran berhasil</h3><div class="amount-big">${rp(o.amount)}</div><p style="margin:6px 0 14px"><small>${o.idxs.map(idxLabel).join(', ')}</small></p><button class="btn primary block" data-act="payDone">Selesai</button></section>`;
+  if (o.status !== 'pending') return `<section class="card glass pay-ok fx"><h3>${o.status === 'expired' ? 'Waktu habis' : 'Pembayaran gagal'}</h3><p style="margin:10px 0 14px"><small>Belum ada uang yang terpotong dari tagihan ini.</small></p><button class="btn primary block" data-act="payDone">Coba lagi</button></section>`;
+  const left = Math.max(0, Math.round((new Date(o.expiresAt) - Date.now()) / 1000));
+  return `<section class="card glass qr-box fx"><h3>${o.method === 'gopay' ? 'GoPay' : 'QRIS'}</h3>
+    <div class="qr" id="payQr"></div>
+    <div class="amount-big">${rp(o.amount)}</div>
+    <p style="margin:2px 0 10px"><small>${o.idxs.length} minggu · sisa waktu <span class="cd" id="payCd">${pad(Math.floor(left / 60))}:${pad(left % 60)}</span></small></p>
+    <div class="btns" style="justify-content:center">
+      ${o.method === 'gopay' && o.deeplink ? `<a class="btn primary" href="${esc(o.deeplink)}">Buka GoPay</a>` : ''}
+      <button class="btn soft" data-act="payCheck">Cek status</button>
+      <button class="btn ghost" data-act="payDone">Batal</button></div>
+  </section>`;
+};
 V.bayar = () => {
   const D = S.data, st = D.settings, me = D.students.find(s => s.id === S.me), mx = me && stat(me);
-  const w = S.payWeeks || Math.max(1, mx ? mx.arrears : 1), total = w * Number(st.nominal);
+  const auto = PAY && me && !Pay.manual;
+  const o = Pay.order && me && Pay.order.studentId === me.id ? Pay.order : null;
+  if (PAY && o) return `${header('Bayar kas')}<div class="cols"><div>${payOrder(o)}</div></div>`;
+  const w = Math.min(auto ? 12 : 48, S.payWeeks || Math.max(1, mx ? mx.arrears : 1)), total = w * Number(st.nominal);
   S.payWeeks = w;
-  return `${header('Bayar kas via QRIS')}
+  const stepper = `<div class="stepper"><button data-act="payDec" aria-label="Kurangi">−</button><b>${w} minggu</b><button data-act="payInc" aria-label="Tambah">+</button></div><div class="amount-big">${rp(total)}</div>`;
+  if (PAY && !me) return `${header('Bayar kas')}<section class="card glass fx" style="text-align:center"><h3>Pilih namamu dulu</h3><div style="margin-top:12px"><button class="btn primary" data-act="pickMe">Pilih nama</button></div></section>`;
+  if (auto) return `${header('Bayar kas')}<div class="cols"><div><section class="card glass qr-box fx">
+    <h3>${esc(me.nama)}</h3>${stepper}
+    <div class="paymeth"><button class="btn primary block" data-act="payStart" data-m="qris" ${Pay.busy ? 'disabled' : ''}>${ic('qr')} Bayar QRIS</button>
+      <button class="btn soft block" data-act="payStart" data-m="gopay" ${Pay.busy ? 'disabled' : ''}>${ic('wallet')} Bayar GoPay</button></div>
+    <p style="margin-top:14px"><button class="link" data-act="payManual">Bayar manual</button></p></section></div></div>`;
+  return `${header('Bayar kas')}
   <div class="cols"><div>
-  <section class="card glass qr-box fx"><h3>Scan QRIS ${esc(st.bendahara)}</h3><small>Bendahara kelas</small>
-    <div class="qr">${st.qris ? `<img src="${esc(st.qris)}" alt="QRIS ${esc(st.bendahara)}" loading="lazy" decoding="async">` : `<div class="qr-ph">${ic('qr', 70)}<div>QR belum diunggah.${S.admin ? '<br>Unggah di bawah.' : '<br>Hubungi bendahara.'}</div></div>`}</div>
-    <div class="stepper"><button data-act="payDec" aria-label="Kurangi">−</button><b>${w} minggu</b><button data-act="payInc" aria-label="Tambah">+</button></div>
-    <div class="amount-big">${rp(total)}</div>
+  <section class="card glass qr-box fx"><h3>QRIS ${esc(st.bendahara)}</h3>
+    <div class="qr">${st.qris ? `<img src="${esc(st.qris)}" alt="QRIS ${esc(st.bendahara)}" loading="lazy" decoding="async">` : `<div class="qr-ph">${ic('qr', 70)}<div>QR belum diunggah.</div></div>`}</div>
+    ${stepper}
     <div class="btns" style="justify-content:center;margin-top:12px">
       <button class="btn soft sm" data-act="copyAmt" data-v="${total}">${ic('copy', 15)} Salin nominal</button>
       ${st.qris ? `<a class="btn soft sm" href="${esc(st.qris)}" download="qris-${esc(st.bendahara)}.jpg">${ic('download', 15)} Unduh QR</a>` : ''}
     </div>
+    <div class="btns" style="margin-top:14px"><button class="btn primary block" data-act="sendProof" data-v="${total}">${ic('send')} Kirim bukti</button></div>
     ${S.admin ? `<div style="margin-top:12px"><label class="btn ghost sm" style="cursor:pointer">${ic('edit', 15)} ${st.qris ? 'Ganti' : 'Unggah'} QR<input id="qrFile" type="file" accept="image/*" hidden></label></div>` : ''}
-  </section></div>
-  <div><section class="card glass fx"><h3 style="margin-bottom:10px">Cara bayar</h3>
-    <ol class="steps">
-      <li><span>Buka e-wallet/m-banking, pilih <b>Scan QRIS</b>, lalu scan kode di samping.</span></li>
-      <li><span>Masukkan nominal <b>${rp(total)}</b> (${w} minggu × ${rp(st.nominal)}).</span></li>
-      <li><span>Setelah berhasil, <b>screenshot bukti transfer</b>.</span></li>
-      <li><span>Kirim buktinya ke bendahara <b>${esc(st.bendahara)}</b>. Status kasmu akan diperbarui setelah dicek.</span></li></ol>
-    <div class="btns" style="margin-top:14px"><button class="btn primary block" data-act="sendProof" data-v="${total}">${ic('send')} Kirim bukti ke ${esc(st.bendahara)}</button></div>
-    ${st.wa ? '' : '<p style="margin-top:8px"><small>Nomor WhatsApp bendahara belum diisi (admin: Menu → Pengaturan).</small></p>'}
+    ${PAY && Pay.manual ? '<p style="margin-top:12px"><button class="link" data-act="payAuto">Kembali ke bayar otomatis</button></p>' : ''}
   </section></div></div>`;
 };
 
 V.menu = () => {
-  const soon = (i, l) => `<div class="tile glass fx soon" aria-disabled="true"><span class="ti">${ic(i)}</span>${l}<small>Segera</small></div>`;
-  const st = S.data.settings, tile = (act, icon, label, sub = '', href) => `<${href ? `a href="${href}"` : `button data-act="${act}"`} class="tile glass fx"><span class="ti">${ic(icon)}</span>${label}${sub ? `<small>${sub}</small>` : ''}</${href ? 'a' : 'button'}>`;
+  const soon = (i, l) => `<div class="tile glass fx soon" aria-disabled="true"><span class="ti">${ic(i)}</span>${l}</div>`;
+  const st = S.data.settings, tile = (act, icon, label, href) => `<${href ? `a href="${href}"` : `button data-act="${act}"`} class="tile glass fx"><span class="ti">${ic(icon)}</span>${label}</${href ? 'a' : 'button'}>`;
   const me = S.data.students.find(s => s.id === S.me);
-  return `<h1 class="chalk menu-title fx">Menu</h1>
+  return `<h1 class="page-title fx">Menu</h1>
   <div class="menu-grid">
-    ${tile('', 'wallet', 'Bayar Kas', 'QRIS', '#/bayar')}
-    ${tile('', 'clock', 'Riwayat', 'Transaksi', '#/riwayat')}
-    ${tile('', 'chart', 'Rangkuman', 'Laporan', '#/rangkuman')}
-    ${tile('', 'users', 'Siswa', S.data.students.length + ' anak', '#/siswa')}
-    ${tile('', 'mega', 'Pengumuman', '', '#/pengumuman')}
-    ${st.spreadsheetUrl ? `<a class="tile glass fx" href="${esc(st.spreadsheetUrl)}" target="_blank" rel="noopener"><span class="ti">${ic('sheet')}</span>Spreadsheet<small>Google Sheets</small></a>` : ''}
+    ${tile('', 'wallet', 'Bayar Kas', '#/bayar')}
+    ${tile('', 'clock', 'Riwayat', '#/riwayat')}
+    ${tile('', 'chart', 'Rangkuman', '#/rangkuman')}
+    ${tile('', 'users', 'Siswa', '#/siswa')}
+    ${tile('', 'mega', 'Pengumuman', '#/pengumuman')}
+    ${st.spreadsheetUrl ? `<a class="tile glass fx" href="${esc(st.spreadsheetUrl)}" target="_blank" rel="noopener"><span class="ti">${ic('sheet')}</span>Spreadsheet</a>` : ''}
     ${soon('calendar', 'Jadwal')}${soon('coin', 'Patungan')}${soon('vote', 'Vote')}${soon('task', 'Tugas')}
-    ${tile('notif', 'bell', 'Pengingat', 'Notifikasi HP')}
-    ${tile('pickMe', 'user', me ? esc(me.nama.split(' ')[0]) : 'Aku siapa?', 'Pilih namamu')}
-    ${tile('install', 'phone', 'Pasang Aplikasi', 'Jadi APK/PWA')}
-    ${tile('', 'shield', 'Menu Admin', S.admin ? 'Kelola semua' : 'Khusus bendahara', '#/admin')}
-    ${tile(S.admin ? 'logout' : 'login', S.admin ? 'logout' : 'lock', S.admin ? 'Keluar Admin' : 'Masuk Admin', st.bendahara)}
-    ${tile('refresh', 'refresh', 'Segarkan', 'Ambil data baru')}
-  </div>
-  <p class="chalk menu-note fx">Kas rapi, kelas kompak ✨</p>`;
+    ${tile('notif', 'bell', 'Pengingat')}
+    ${tile('pickMe', 'user', me ? esc(me.nama.replace(/\(.*?\)/g, '').trim().split(' ')[0]) : 'Pilih nama')}
+    ${tile('install', 'phone', 'Pasang')}
+    ${tile('', 'shield', 'Admin', '#/admin')}
+    ${tile(S.admin ? 'logout' : 'login', S.admin ? 'logout' : 'lock', S.admin ? 'Keluar' : 'Masuk')}
+    ${tile('refresh', 'refresh', 'Segarkan')}
+  </div>`;
 };
 
 V.admin = () => {
-  if (!S.admin) return `${header('Menu admin')}<div class="empty glass card fx">Khusus admin (bendahara). <br><br><button class="btn primary" data-act="login">Masuk Admin</button></div>`;
-  const D = S.data, t = (act, i, l, sub, href) => `<${href ? `a href="${href}"` : `button data-act="${act}"`} class="tile glass fx"><span class="ti">${ic(i)}</span>${l}<small>${sub}</small></${href ? 'a' : 'button'}>`;
-  return `${header('Menu admin · ' + esc(D.settings.bendahara))}
+  if (!S.admin) return `${header('Menu admin')}<div class="empty glass card fx"><button class="btn primary" data-act="login">Masuk Admin</button></div>`;
+  const D = S.data, t = (act, i, l, href) => `<${href ? `a href="${href}"` : `button data-act="${act}"`} class="tile glass fx"><span class="ti">${ic(i)}</span>${l}</${href ? 'a' : 'button'}>`;
+  return `${header('Menu admin')}
   <div class="menu-grid">
-    ${t('addStudent', 'users', 'Tambah siswa', D.students.length + ' siswa')}
-    ${t('addAnn', 'mega', 'Buat pengumuman', 'Tampil ke semua')}
-    ${t('addTx', 'wallet', 'Catat transaksi', 'Masuk / keluar')}
-    ${t('', 'qr', 'QR QRIS', 'Unggah kode bayar', '#/bayar')}
-    ${t('', 'settings', 'Pengaturan', 'Kas, WA, spreadsheet', '#/pengaturan')}
-    ${t('logout', 'logout', 'Keluar admin', 'Kunci edit')}
+    ${t('addStudent', 'users', 'Tambah siswa')}
+    ${t('addAnn', 'mega', 'Pengumuman')}
+    ${t('addTx', 'wallet', 'Transaksi')}
+    ${t('', 'qr', 'QR QRIS', '#/bayar')}
+    ${t('', 'settings', 'Pengaturan', '#/pengaturan')}
+    ${t('logout', 'logout', 'Keluar')}
   </div>
   ${secH('Kelola siswa')}
-  <div class="glass list-wrap"><div class="list">${D.students.map(s => `<div class="row lite">${avatar(s)}<div class="grow"><b>${esc(s.nama)}</b><small>${s.hp ? esc(s.hp) : 'Belum ada nomor WA'}</small></div>
+  <div class="glass list-wrap"><div class="list">${D.students.map(s => `<div class="row lite">${avatar(s)}<div class="grow"><b>${esc(s.nama)}</b><small>${s.claimed ? 'Sudah diklaim' : 'Belum diklaim'}</small></div>
+    ${s.claimed ? `<button class="ib" data-act="release" data-id="${s.id}" aria-label="Lepas klaim ${esc(s.nama)}">${ic('unlock', 18)}</button>` : ''}
     <button class="ib" data-act="editStudent" data-id="${s.id}" aria-label="Edit ${esc(s.nama)}">${ic('edit', 18)}</button>
-    <button class="ib" data-act="delStudent" data-id="${s.id}" aria-label="Hapus ${esc(s.nama)}">${ic('trash', 18)}</button></div>`).join('') || '<div class="empty">Belum ada siswa. Tekan "Tambah siswa" untuk mulai.</div>'}</div></div>`;
+    <button class="ib" data-act="delStudent" data-id="${s.id}" aria-label="Hapus ${esc(s.nama)}">${ic('trash', 18)}</button></div>`).join('') || '<div class="empty">Belum ada siswa</div>'}</div></div>`;
 };
 
 V.pengaturan = () => {
@@ -409,33 +497,50 @@ V.pengaturan = () => {
 
 /* ---------- navigasi ---------- */
 const NAV = [['beranda', 'Beranda', 'home'], ['pengumuman', 'Pengumuman', 'mega'], ['siswa', 'Siswa', 'users'], ['riwayat', 'Riwayat', 'clock'], ['rangkuman', 'Rangkuman', 'chart'], ['bayar', 'Bayar Kas', 'wallet'], ['menu', 'Menu', 'grid']];
+const DOCK = ['beranda', 'pengumuman', 'siswa', 'menu'];
+let dockI = null;
 function buildNav() {
   const on = r => S.route === r ? 'on' : '';
   const T = S.data ? totals(S.data) : null;
   $('#side').innerHTML = `
-    <div class="brand"><img src="img/icon-192.png" alt="" width="40" height="40"><div><b>Kas Kelas</b><small>${esc(S.data ? S.data.settings.kelas : '')}</small></div></div>
+    <div class="brand" style="padding:6px 8px 14px"><div><b>Kas Kelas</b><small>${esc(S.data ? S.data.settings.kelas : '')}</small></div></div>
     ${NAV.map(([r, l, i]) => `<a class="nav-i ${on(r)}" href="#/${r}">${ic(i)} ${l}</a>`).join('')}
     ${S.admin ? `<a class="nav-i ${on('pengaturan')}" href="#/pengaturan">${ic('settings')} Pengaturan</a>` : ''}
     <div class="grow"></div>
     <div class="adm">${ic(S.admin ? 'user' : 'lock', 18)}<span>${S.admin ? 'Admin aktif' : 'Mode lihat'}</span><button class="btn sm soft" style="margin-left:auto" data-act="${S.admin ? 'logout' : 'login'}">${S.admin ? 'Keluar' : 'Masuk'}</button></div>`;
-  const fabAct = S.admin ? `<button class="fab" data-act="addTx" aria-label="Tambah transaksi">${ic('plus')}</button>` : `<a class="fab" href="#/bayar" aria-label="Bayar kas">${ic('plus')}</a>`;
-  const bn = (r, l, i) => `<a class="bn ${on(r)}" href="#/${r}">${ic(i)}<span>${l}</span>${r === 'siswa' && T && T.arrearsPeople ? `<span class="badge-dot">${T.arrearsPeople}</span>` : ''}</a>`;
-  $('#bottom').innerHTML = bn('beranda', 'Beranda', 'home') + bn('pengumuman', 'Pengumuman', 'mega') + fabAct + bn('siswa', 'Siswa', 'users') + bn('menu', 'Menu', 'grid');
+  const ai = Math.max(0, DOCK.indexOf(S.route) < 0 ? 3 : DOCK.indexOf(S.route));
+  const fab = S.admin ? `<button class="fab glass" data-act="addTx" aria-label="Tambah transaksi">${ic('plus')}</button>` : `<a class="fab glass" href="#/bayar" aria-label="Bayar kas">${ic('plus')}</a>`;
+  const bn = r => { const [, l, i] = NAV.find(n => n[0] === r); return `<a class="bn ${DOCK.indexOf(S.route) < 0 && r === 'menu' ? 'on' : on(r)}" href="#/${r}">${ic(i)}<span>${l}</span>${r === 'siswa' && T && T.arrearsPeople ? `<span class="badge-dot">${T.arrearsPeople}</span>` : ''}</a>`; };
+  $('#bottom').innerHTML = `${fab}<div class="dnav-wrap"><div class="dnav glass" style="--i:${dockI == null ? ai : dockI}"><i class="lens" aria-hidden="true"></i>${DOCK.map(bn).join('')}</div></div>`;
+  if (dockI != null && dockI !== ai) requestAnimationFrame(() => requestAnimationFrame(() => { const d = $('.dnav'); d && d.style.setProperty('--i', ai); }));
+  dockI = ai;
 }
+/* dock menyusut jadi tombol + saat scroll ke bawah, muncul lagi saat scroll ke atas */
+let lastY = 0, acc = 0, scTick = false;
+const setDock = min => { const d = $('#bottom'); if (d) d.classList.toggle('min', min); };
+window.addEventListener('scroll', () => {
+  if (scTick) return; scTick = true;
+  requestAnimationFrame(() => {
+    scTick = false; const y = window.scrollY, dy = y - lastY; lastY = y;
+    if (y < 60) { acc = 0; setDock(false); return; }
+    acc = (dy > 0) === (acc > 0) ? acc + dy : dy;      // jarak scroll searah
+    if (acc > 14) setDock(true); else if (acc < -14) setDock(false);
+  });
+}, { passive: true });
+if (/Chrome\//.test(navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent)) document.documentElement.classList.add('refract');
 
 function render(keepScroll) {
   const v = $('#view'), y = window.scrollY;
-  document.body.classList.toggle('is-menu', S.route !== 'beranda');
   if (!S.data) { v.innerHTML = S.err ? `<div class="card glass empty">${esc(S.err)}<br><br><button class="btn primary" data-act="refresh">Coba lagi</button></div>` : skeleton(); buildNav(); return; }
   v.innerHTML = (V[S.route] || V.beranda)();
-  buildNav(); observeFx(); lazyMore();
+  buildNav(); observeFx(); lazyMore(); Pay.sync();
   if (keepScroll) window.scrollTo(0, y); else window.scrollTo(0, 0);
 }
 function route() {
   const r = (location.hash.replace(/^#\/?/, '') || 'beranda');
   S.route = V[r] ? r : 'beranda';
   S.lim = { st: 16, tx: 14 };
-  closeSheet(); render();
+  setDock(false); closeSheet(); render();
 }
 
 /* lazy render daftar panjang: tampilkan bertahap saat discroll */
@@ -452,11 +557,12 @@ async function loadData(silent) {
   S.loading = true; if (!S.data) render(); else $$('[data-act=refresh]').forEach(b => b.classList.add('spin'));
   const r = await api('data');
   S.loading = false;
-  if (r.ok) { S.data = r.data; S.updated = new Date(); S.err = ''; ls.set(KEY, r.data); }
+  if (r.ok) { S.data = r.data; S.updated = new Date(); S.err = ''; ls.set(KEY, r.data); if (typeof r.me === 'number') { S.me = r.me; ls.set('kas-me', r.me); } const ik = $('#introKelas'); if (ik) ik.textContent = r.data.settings.kelas || 'Kas Kelas'; }
   else if (!S.data) S.err = r.error || 'Gagal memuat data';
   else if (!silent) toast(r.error || 'Gagal memuat');
   if (S.admin === false && S.pin) verifyPin();
   render(!!S.data); refreshSheet(); maybeNotify();
+  if (S.data && r.ok && !S.me && !S.asked && S.route === 'beranda' && !S.sheet && S.data.students.some(x => !x.claimed)) { S.asked = true; setTimeout(() => { if (!S.me && !S.sheet) pickMe(); }, 500); }
 }
 async function verifyPin() { const r = await api('login', { pin: S.pin }); if (r.ok) { S.admin = true; applyAdmin(); render(true); } else { S.pin = ''; ls.del('kas-pin'); } }
 async function write(action, p, okMsg) {
@@ -478,19 +584,21 @@ function showStudent(id) {
   }).join('')}</div></div>`).join('');
   openSheet(`
     <button class="ib x" data-act="close" aria-label="Tutup">${ic('x')}</button>
-    <div class="s-head">${avatar(s)}<div><h2 style="margin:0">${esc(s.nama)}</h2><small>No. ${s.no}</small> ${badge(x)}</div></div>
+    <div class="s-head">${S.me === s.id ? `<label class="edit-photo" aria-label="Ganti foto">${avatar(s, 'big')}<span class="cam">${ic('camera')}</span><input id="fotoFile" type="file" accept="image/*" hidden></label>` : avatar(s)}<div><h2 style="margin:0">${esc(s.nama)}</h2>${badge(x)}</div></div>
     <div class="kv"><div><b>${x.thisPaid ? 'Lunas' : 'Belum'}</b><small>Minggu ini</small></div><div><b>${x.paidCount}/${x.expected}</b><small>Minggu dibayar</small></div><div><b style="color:${x.arrears ? 'var(--red)' : 'var(--green-d)'}">${rp(x.amount)}</b><small>Tunggakan</small></div></div>
-    ${x.arrears ? `<p style="margin-bottom:10px;font-size:13.5px"><b>Belum dibayar:</b> ${x.due.map(idxLabel).join(', ')}</p>` : '<p style="margin-bottom:10px;font-size:13.5px">Semua minggu sudah lunas 🎉</p>'}
+    ${x.arrears ? `<p style="margin-bottom:10px;font-size:13.5px"><b>Belum dibayar:</b> ${x.due.map(idxLabel).join(', ')}</p>` : '<p style="margin-bottom:10px;font-size:13.5px">Lunas semua 🎉</p>'}
     <div class="legend"><span><i style="background:var(--green)"></i>Bayar</span><span><i style="background:var(--red-l);box-shadow:inset 0 0 0 1.5px var(--red)"></i>Belum</span><span><i style="background:#e6ece8"></i>Belum jatuh tempo</span></div>
     <div class="mgrid">${months}</div>
     <div class="btns">
-      ${S.me === s.id ? '' : `<button class="btn soft sm" data-act="setMe" data-id="${s.id}">${ic('user', 15)} Ini aku</button>`}
+      ${S.me === s.id && s.foto ? `<button class="btn ghost sm" data-act="delFoto">Hapus foto</button>` : ''}
+      ${S.me === s.id ? `<button class="btn ghost sm" data-act="unclaim">${ic('unlock', 15)} Lepas namaku</button>` : ''}
+      ${S.admin && s.claimed && S.me !== s.id ? `<button class="btn ghost sm" data-act="release" data-id="${s.id}">${ic('unlock', 15)} Lepas klaim</button>` : ''}
       ${S.admin && !x.thisPaid && x.cur >= 0 ? `<button class="btn primary sm" data-act="payThis" data-id="${s.id}">${ic('check', 15)} Tandai lunas minggu ini</button>` : ''}
       ${S.admin && x.arrears > 1 ? `<button class="btn primary sm" data-act="payAll" data-id="${s.id}">Lunasi semua (${rp(x.amount)})</button>` : ''}
       ${S.admin && x.arrears ? `<button class="btn ghost sm" data-act="remind" data-id="${s.id}">${ic('send', 15)} Ingatkan via WA</button>` : ''}
       ${S.admin ? `<button class="btn ghost sm" data-act="editStudent" data-id="${s.id}">${ic('edit', 15)} Edit data</button>` : ''}
     </div>
-    ${S.admin ? '<p style="margin-top:10px"><small>Ketuk kotak minggu untuk menandai bayar / batal. Pemasukan otomatis tercatat.</small></p>' : ''}`, { type: 'student', id });
+`, { type: 'student', id });
 }
 
 function txForm(t) {
@@ -520,13 +628,34 @@ function studentForm(s) {
     <div class="grid2"><button type="button" class="btn ghost" data-act="close">Batal</button><button class="btn primary" type="submit">Simpan</button></div></form>`);
 }
 function loginForm() {
-  openSheet(`<button class="ib x" data-act="close" aria-label="Tutup">${ic('x')}</button><h2>Masuk Admin</h2><p style="margin-bottom:12px;font-size:14px">Khusus bendahara/admin untuk mengedit data.</p>
+  openSheet(`<button class="ib x" data-act="close" aria-label="Tutup">${ic('x')}</button><h2>Masuk Admin</h2>
   <form data-form="login"><div class="field"><label>PIN</label><input name="pin" type="password" required autocomplete="current-password" autofocus></div>
-  <button class="btn primary block" type="submit">Masuk</button>${DEMO ? '<p style="margin-top:10px"><small>Mode demo: PIN = 1234</small></p>' : ''}</form>`);
+  <button class="btn primary block" type="submit">Masuk</button>${DEMO ? '<p style="margin-top:10px"><small>Demo: PIN 1234</small></p>' : ''}</form>`);
 }
 function pickMe() {
-  openSheet(`<button class="ib x" data-act="close" aria-label="Tutup">${ic('x')}</button><h2>Kamu siapa?</h2><p style="margin-bottom:10px;font-size:14px">Pilih namamu supaya dapat pengingat kalau belum bayar kas. Tersimpan di perangkat ini saja.</p>
-  <div class="list">${S.data.students.map(s => `<button class="row lite" data-act="setMe" data-id="${s.id}">${avatar(s)}<div class="grow"><b>${esc(s.nama)}</b></div>${S.me === s.id ? ic('check') : ''}</button>`).join('')}</div>`);
+  if (S.me) return showStudent(S.me);
+  const L = S.data.students;
+  openSheet(`<button class="ib x" data-act="close" aria-label="Tutup">${ic('x')}</button><h2>Kamu siapa?</h2>
+  <div class="list">${L.map(s => `<button class="row lite pick-row ${s.claimed ? 'taken' : ''}" data-act="askClaim" data-id="${s.id}">${avatar(s)}<div class="grow"><b>${esc(s.nama)}</b></div>${s.claimed ? '<span class="badge muted">Diklaim</span>' : ic('chev')}</button>`).join('') || '<div class="empty">Belum ada siswa</div>'}</div>`, { type: 'pick' });
+}
+function askClaim(id) {
+  const s = S.data.students.find(x => x.id === id); if (!s || s.claimed) return;
+  openSheet(`<h2>Kamu ${esc(s.nama)}?</h2><p style="margin-bottom:14px;font-size:14px">Nama ini akan terkunci untuk perangkatmu dan tidak bisa dipakai orang lain.</p>
+  <div class="grid2"><button class="btn ghost" data-act="pickBack">Bukan</button><button class="btn primary" data-act="doClaim" data-id="${s.id}">Ya, itu aku</button></div>`, { type: 'confirm' });
+}
+function compressPhoto(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const N = 144, c = document.createElement('canvas'); c.width = c.height = N;
+      const k = Math.min(img.width, img.height), sx = (img.width - k) / 2, sy = (img.height - k) / 2;
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, N, N); x.drawImage(img, sx, sy, k, k, 0, 0, N, N);
+      let q = .8, d = c.toDataURL('image/jpeg', q); while (d.length > 20000 && q > .3) { q -= .1; d = c.toDataURL('image/jpeg', q); }
+      URL.revokeObjectURL(url); d.length > 25000 ? rej(new Error('Foto terlalu besar')) : res(d);
+    };
+    img.onerror = () => rej(new Error('Foto tidak bisa dibaca'));
+    img.src = url;
+  });
 }
 
 /* ---------- pengingat HP (notifikasi lokal) ---------- */
@@ -571,7 +700,21 @@ const ACT = {
   login: loginForm,
   logout: () => { S.admin = false; S.pin = ''; ls.del('kas-pin'); applyAdmin(); closeSheet(); render(true); toast('Keluar dari admin'); },
   pickMe,
-  setMe: t => { S.me = +t.dataset.id; ls.set('kas-me', S.me); toast('Tersimpan: ' + S.data.students.find(s => s.id === S.me).nama); closeSheet(); render(true); maybeNotify(); },
+  askClaim: t => askClaim(+t.dataset.id),
+  pickBack: () => pickMe(),
+  doClaim: async t => {
+    const r = await api('claim', { studentId: +t.dataset.id });
+    if (r.ok) { S.data = r.data; S.me = r.me; ls.set('kas-me', S.me); ls.set(KEY, r.data); toast('Nama terkunci untukmu'); closeSheet(); render(true); maybeNotify(); }
+    else { toast(r.error || 'Gagal'); await loadData(true); if (!S.me) pickMe(); }
+  },
+  unclaim: async () => { if (!confirm('Lepas namamu? Orang lain bisa memilih nama ini.')) return; const r = await api('unclaim'); if (r.ok) { S.data = r.data; S.me = 0; ls.set('kas-me', 0); closeSheet(); render(true); toast('Nama dilepas'); } else toast(r.error || 'Gagal'); },
+  release: t => { const x = S.data.students.find(v => v.id === +t.dataset.id); if (x && confirm(`Lepas klaim ${x.nama}?`)) write('releaseClaim', { id: x.id }, 'Klaim dilepas'); },
+  delFoto: async () => { const r = await api('photo', { foto: '' }); if (r.ok) { S.data = r.data; render(true); refreshSheet(); toast('Foto dihapus'); } else toast(r.error || 'Gagal'); },
+  payStart: t => Pay.start(t.dataset.m),
+  payCheck: () => Pay.check(true),
+  payDone: () => { Pay.set(null); render(true); },
+  payManual: () => { Pay.manual = true; render(true); },
+  payAuto: () => { Pay.manual = false; render(true); },
   openStudent: t => showStudent(+t.dataset.id),
   stFilter: t => { S.stFilter = t.dataset.v; S.lim.st = 16; render(true); },
   txFilter: t => { S.txFilter = t.dataset.v; S.lim.tx = 14; render(true); },
@@ -599,7 +742,7 @@ const ACT = {
     window.open(`https://wa.me/${(s.hp || '').replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
   },
   copyRemind: () => { const un = S.data.students.filter(s => !stat(s).thisPaid); copyText(`📢 Pengingat Kas ${S.data.settings.kelas}\nKas minggu ini ${rp(S.data.settings.nominal)}. Yang belum bayar:\n${un.map((s, i) => `${i + 1}. ${s.nama}${stat(s).arrears > 1 ? ` (${stat(s).arrears} mgg)` : ''}`).join('\n')}\n\nBayar via QRIS di web kas kelas, lalu kirim bukti ke ${S.data.settings.bendahara}. Terima kasih 🙏`); },
-  payInc: () => { S.payWeeks = Math.min(48, (S.payWeeks || 1) + 1); render(true); },
+  payInc: () => { S.payWeeks = Math.min(PAY && !Pay.manual ? 12 : 48, (S.payWeeks || 1) + 1); render(true); },
   payDec: () => { S.payWeeks = Math.max(1, (S.payWeeks || 1) - 1); render(true); },
   copyAmt: t => copyText(t.dataset.v),
   sendProof: t => {
@@ -611,11 +754,17 @@ const ACT = {
 };
 document.addEventListener('click', e => {
   if (e.target.id === 'sheet') return closeSheet();
+  if (e.target.closest('.dock.min .fab')) { e.preventDefault(); return setDock(false); }
   const t = e.target.closest('[data-act]'); if (t && ACT[t.dataset.act]) { e.preventDefault(); ACT[t.dataset.act](t); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
 document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; S.lim.st = 16; const pos = e.target.selectionStart; render(true); const q = $('#q'); q.focus(); q.setSelectionRange(pos, pos); } });
 document.addEventListener('change', async e => {
+  if (e.target.id === 'fotoFile' && e.target.files[0]) {
+    try { const r = await api('photo', { foto: await compressPhoto(e.target.files[0]) }); if (r.ok) { S.data = r.data; ls.set(KEY, r.data); render(true); refreshSheet(); toast('Foto diperbarui'); } else toast(r.error || 'Gagal'); }
+    catch (er) { toast(er.message); }
+    return;
+  }
   if (e.target.id !== 'qrFile' || !e.target.files[0]) return;
   const f = e.target.files[0], img = new Image(), url = URL.createObjectURL(f);
   img.onload = async () => {
@@ -665,7 +814,7 @@ async function boot() {
   if (S.pin) S.admin = false; // diverifikasi setelah data masuk
   const cache = ls.get(KEY);
   const hash = location.hash.replace(/^#\/?/, '') || 'beranda'; S.route = V[hash] ? hash : 'beranda';
-  if (cache) { S.data = cache; setTimeout(() => {}, 0); }
+  if (cache) { S.data = cache; const ik = $('#introKelas'); if (ik && cache.settings.kelas) ik.textContent = cache.settings.kelas; }
   render(); // skeleton jika belum ada cache
   loadData(true);
 }
