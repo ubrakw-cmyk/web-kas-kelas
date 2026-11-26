@@ -1,7 +1,7 @@
 // Service worker ringan: cache file statis agar web cepat & bisa dibuka offline.
-const V = 'kas-kelas-v3';
+const V = 'kas-kelas-v5';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.json',
-  'img/bg-menu.webp', 'img/bg-intro.webp', 'img/icon-192.png', 'img/favicon.png'];
+  'img/icon-192.png', 'img/favicon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
