@@ -11,28 +11,33 @@
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<!-- Lensa kaca (pembiasan) untuk dock -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <filter id="lens" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feImage href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='x'%3E%3Cstop offset='0' stop-color='%23f00'/%3E%3Cstop offset='.28' stop-color='%23800'/%3E%3Cstop offset='.72' stop-color='%23800'/%3E%3Cstop offset='1' stop-color='%23000'/%3E%3C/linearGradient%3E%3ClinearGradient id='y' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%230f0'/%3E%3Cstop offset='.3' stop-color='%23080'/%3E%3Cstop offset='.7' stop-color='%23080'/%3E%3Cstop offset='1' stop-color='%23000'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' fill='%23808080'/%3E%3Crect width='100' height='100' fill='url(%23x)'/%3E%3Crect width='100' height='100' fill='url(%23y)' style='mix-blend-mode:screen'/%3E%3C/svg%3E" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="m"/>
+    <feDisplacementMap in="SourceGraphic" in2="m" scale="34" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</defs></svg>
+
 <!-- Pembuka -->
 <div id="intro" role="dialog" aria-label="Pembuka">
   <div class="intro-in">
-    <img class="intro-ico" src="img/icon-192.png" alt="" width="84" height="84">
-    <h1 class="chalk">Kas Kelas</h1>
-    <p class="chalk sub" id="introKelas">Catatan kas yang rapi &amp; transparan</p>
-    <button class="btn glass intro-btn" id="introGo" type="button">Mulai</button>
+    <span class="intro-pill">KAS KELAS</span>
+    <h1 class="intro-h">WELCOME TO<em id="introKelas">KAS KELAS</em></h1>
+    <button class="btn intro-btn" id="introGo" type="button">Mulai</button>
   </div>
 </div>
-
-<div class="bg-menu" id="bgMenu" aria-hidden="true"></div>
 
 <div class="app">
   <aside class="side glass" id="side"></aside>
   <main id="view" tabindex="-1"></main>
 </div>
-<nav class="bottom glass" id="bottom" aria-label="Navigasi utama"></nav>
+<nav class="dock" id="bottom" aria-label="Navigasi utama"></nav>
 
 <div id="sheet" class="sheet-wrap" hidden></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
