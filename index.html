@@ -6,12 +6,16 @@
 <title>Kas Kelas</title>
 <meta name="description" content="Aplikasi kas kelas: catatan pembayaran mingguan, saldo, dan laporan yang transparan.">
 <meta name="theme-color" content="#16a06a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kas Kelas">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,13 +28,14 @@
   </filter>
 </defs></svg>
 
-<!-- Pembuka -->
-<div id="intro" role="dialog" aria-label="Pembuka">
-  <div class="intro-in">
-    <span class="intro-pill">KAS KELAS</span>
-    <h1 class="intro-h">WELCOME TO<em id="introKelas">KAS KELAS</em></h1>
-    <button class="btn intro-btn" id="introGo" type="button">Mulai</button>
-  </div>
+<!-- Pembuka (animasi, tanpa teks) -->
+<div id="intro" aria-hidden="true">
+  <div class="in-rain r1"></div><div class="in-rain r2"></div>
+  <i class="sh s1"></i><i class="sh s2"></i><i class="sh s3"></i><i class="sh s4"></i><i class="sh s5"></i><i class="sh s6"></i>
+  <img class="fb f1" src="img/bill.webp" alt=""><img class="fb f2" src="img/bill.webp" alt=""><img class="fb f3" src="img/bill.webp" alt="">
+  <img class="fb f4" src="img/bill.webp" alt=""><img class="fb f5" src="img/bill.webp" alt=""><img class="fb f6" src="img/bill.webp" alt="">
+  <div class="in-card"><span class="dots3"><i></i><i></i><i></i></span><img class="in-pic" src="img/krabs.webp" alt=""><i class="coin k1"></i><i class="coin k2"></i><i class="coin k3"></i></div>
+  <div class="in-bar"><i></i></div>
 </div>
 
 <div class="app">
